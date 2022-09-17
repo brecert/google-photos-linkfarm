@@ -15,20 +15,36 @@ mod metadata;
 use counter::Counter;
 use metadata::Metadata;
 
-fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
+#[fncmd::fncmd]
+fn main(
+    /// Directory to link from
+    #[opt(short, long)]
+    input: PathBuf,
+    /// Directory to create links to
+    #[opt(short, long)]
+    output: PathBuf,
+) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    fs::metadata(&output).map_err(|e| format!("Unable to read output directory: {e}"))?;
+
     let mut counter: HashMap<String, u64> = HashMap::new();
     let mut jsons: HashSet<PathBuf> = HashSet::new();
 
-    fs::create_dir_all(".links")?;
+    let json_pattern = input
+        .join("**")
+        .join("*.json")
+        .to_string_lossy()
+        .to_string();
+
+    let file_pattern = input.join("**").join("*").to_string_lossy().to_string();
 
     println!("Indexing metadata");
-    for file in glob(".Takeout/**/*.json")? {
+    for file in glob(&json_pattern)? {
         let file = absolute(file?)?;
         jsons.insert(file);
     }
 
     println!("Linking files");
-    for file in glob(".Takeout/**/*").expect("Failed to read glob pattern") {
+    for file in glob(&file_pattern)? {
         let file = file?;
         let file = absolute(file)?;
         match file.extension() {
@@ -53,14 +69,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                         let json_path =
                             file.with_extension(extension.to_string_lossy().to_string() + ".json");
 
-                        
                         let meta: Option<Metadata> = match jsons.contains(&json_path) {
-                            true => {
-                                serde_json::from_str(&fs::read_to_string(json_path)?)?
-                            }
-                            false => None
+                            true => serde_json::from_str(&fs::read_to_string(json_path)?)?,
+                            false => None,
                         };
-                        
+
                         let people: Option<_> = meta
                             .and_then(|m| m.people)
                             .map(|people| people.into_iter().map(|person| person.name))
@@ -79,9 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                                     name += &format!(" ({})", name_count)
                                 };
 
-                                let link_path: PathBuf = [Path::new(".links"), Path::new(&name)]
-                                    .into_iter()
-                                    .collect();
+                                let link_path: PathBuf = output.join(&name);
 
                                 let link_path = absolute(&link_path)?.with_extension(extension);
 
@@ -91,7 +102,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                                 filetime::set_symlink_file_times(&file, time, time).unwrap();
                             }
                             None => {
-                                let dir = Path::new(".links/No Date");
+                                let link_path = output.join("No Date");
+
                                 let mut name = file
                                     .file_name()
                                     .ok_or("File ends in ..")?
@@ -106,9 +118,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
                                     name += &format!(" ({})", name_count)
                                 };
 
-                                fs::create_dir_all(dir)?;
+                                fs::create_dir_all(&link_path)?;
                                 let link_path: PathBuf =
-                                    [dir, Path::new(&name)].into_iter().collect();
+                                    [&link_path, Path::new(&name)].into_iter().collect();
 
                                 let link_path = absolute(&link_path)?.with_extension(extension);
 
