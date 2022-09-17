@@ -5,7 +5,7 @@ use chrono::NaiveDateTime;
 use filetime::FileTime;
 use glob::glob;
 use rexif::{self, ExifTag};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::os::windows::fs::symlink_file;
 use std::path::{absolute, Path, PathBuf};
@@ -27,7 +27,7 @@ fn main(
     fs::metadata(&output).map_err(|e| format!("Unable to read output directory: {e}"))?;
 
     let mut counter: HashMap<String, u64> = HashMap::new();
-    let mut jsons: HashSet<PathBuf> = HashSet::new();
+    let mut metadata: HashMap<PathBuf, Metadata> = HashMap::new();
 
     let json_pattern = input
         .join("**")
@@ -37,13 +37,14 @@ fn main(
 
     let file_pattern = input.join("**").join("*").to_string_lossy().to_string();
 
-    println!("Indexing metadata");
+    println!("Indexing Metadata");
     for file in glob(&json_pattern)? {
         let file = absolute(file?)?;
-        jsons.insert(file);
+        let meta: Metadata = serde_json::from_str(&fs::read_to_string(&file)?)?;
+        metadata.insert(file, meta);
     }
 
-    println!("Linking files");
+    println!("Linking Files");
     for file in glob(&file_pattern)? {
         let file = file?;
         let file = absolute(file)?;
@@ -69,16 +70,13 @@ fn main(
                         let json_path =
                             file.with_extension(extension.to_string_lossy().to_string() + ".json");
 
-                        let meta: Option<Metadata> = match jsons.contains(&json_path) {
-                            true => serde_json::from_str(&fs::read_to_string(json_path)?)?,
-                            false => None,
-                        };
+                        let meta: Option<&Metadata> = metadata.get(&json_path);
 
                         let people: Option<_> = meta
-                            .and_then(|m| m.people)
-                            .map(|people| people.into_iter().map(|person| person.name))
+                            .and_then(|m| m.people.as_ref())
+                            .map(|people| people.into_iter().map(|person| person.name.as_ref()))
                             .map(|names| names.collect())
-                            .map(|names: Vec<String>| names.join(", "));
+                            .map(|names: Vec<&str>| names.join(", "));
 
                         match date {
                             Some(date) => {
