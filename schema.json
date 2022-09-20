@@ -1,0 +1,223 @@
+{
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string"
+            },
+            "description": {
+                "type": "string"
+            },
+            "access": {
+                "type": "string"
+            },
+            "date": {
+                "type": "object",
+                "properties": {
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "formatted": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "timestamp",
+                    "formatted"
+                ]
+            },
+            "location": {
+                "type": "string"
+            },
+            "geoData": {
+                "type": "object",
+                "properties": {
+                    "latitude": {
+                        "type": "number"
+                    },
+                    "longitude": {
+                        "type": "number"
+                    },
+                    "altitude": {
+                        "type": "number"
+                    },
+                    "latitudeSpan": {
+                        "type": "integer"
+                    },
+                    "longitudeSpan": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "latitude",
+                    "longitude",
+                    "altitude",
+                    "latitudeSpan",
+                    "longitudeSpan"
+                ]
+            },
+            "imageViews": {
+                "type": "string"
+            },
+            "creationTime": {
+                "type": "object",
+                "properties": {
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "formatted": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "timestamp",
+                    "formatted"
+                ]
+            },
+            "photoTakenTime": {
+                "type": "object",
+                "properties": {
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "formatted": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "timestamp",
+                    "formatted"
+                ]
+            },
+            "geoDataExif": {
+                "type": "object",
+                "properties": {
+                    "latitude": {
+                        "type": "number"
+                    },
+                    "longitude": {
+                        "type": "number"
+                    },
+                    "altitude": {
+                        "type": "number"
+                    },
+                    "latitudeSpan": {
+                        "type": "integer"
+                    },
+                    "longitudeSpan": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "latitude",
+                    "longitude",
+                    "altitude",
+                    "latitudeSpan",
+                    "longitudeSpan"
+                ]
+            },
+            "url": {
+                "type": "string"
+            },
+            "googlePhotosOrigin": {
+                "type": "object",
+                "properties": {
+                    "photosDesktopUploader": {
+                        "type": "object"
+                    },
+                    "composition": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "type"
+                        ]
+                    },
+                    "picasa": {
+                        "type": "object"
+                    },
+                    "mobileUpload": {
+                        "type": "object",
+                        "properties": {
+                            "deviceType": {
+                                "type": "string"
+                            },
+                            "deviceFolder": {
+                                "type": "object",
+                                "properties": {
+                                    "localFolderName": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "localFolderName"
+                                ]
+                            }
+                        }
+                    },
+                    "webUpload": {
+                        "type": "object",
+                        "properties": {
+                            "computerUpload": {
+                                "type": "object"
+                            }
+                        },
+                        "required": [
+                            "computerUpload"
+                        ]
+                    },
+                    "fromPartnerSharing": {
+                        "type": "object"
+                    },
+                    "driveSync": {
+                        "type": "object"
+                    }
+                }
+            },
+            "photoLastModifiedTime": {
+                "type": "object",
+                "properties": {
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "formatted": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "timestamp",
+                    "formatted"
+                ]
+            },
+            "people": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "name"
+                    ]
+                }
+            },
+            "tags": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            }
+        },
+        "required": [
+            "title",
+            "description",
+            "geoData"
+        ]
+    }
+}

@@ -1,14 +1,18 @@
 #![feature(fs_try_exists)]
 #![feature(absolute_path)]
+#![feature(backtrace)]
+#![feature(path_file_prefix)]
 
+use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDateTime;
+use dashmap::{DashMap, DashSet};
 use filetime::FileTime;
 use glob::glob;
+use rayon::prelude::*;
 use rexif::{self, ExifTag};
-use std::collections::HashMap;
 use std::fs;
-use std::os::windows::fs::symlink_file;
-use std::path::{absolute, Path, PathBuf};
+use std::fs::hard_link;
+use std::path::{absolute, PathBuf};
 
 mod counter;
 mod metadata;
@@ -23,11 +27,12 @@ fn main(
     /// Directory to create links to
     #[opt(short, long)]
     output: PathBuf,
-) -> Result<(), Box<dyn std::error::Error + 'static>> {
-    fs::metadata(&output).map_err(|e| format!("Unable to read output directory: {e}"))?;
+) -> Result<()> {
+    fs::metadata(&output).map_err(|e| anyhow!("Unable to read output directory: {e}"))?;
 
-    let mut counter: HashMap<String, u64> = HashMap::new();
-    let mut metadata: HashMap<PathBuf, Metadata> = HashMap::new();
+    let counter: DashMap<String, u64> = DashMap::new();
+    let used_named: DashSet<String> = DashSet::new();
+    let metadata: DashMap<PathBuf, Metadata> = DashMap::new();
 
     let json_pattern = input
         .join("**")
@@ -38,104 +43,138 @@ fn main(
     let file_pattern = input.join("**").join("*").to_string_lossy().to_string();
 
     println!("Indexing Metadata");
-    for file in glob(&json_pattern)? {
-        let file = absolute(file?)?;
-        let meta: Metadata = serde_json::from_str(&fs::read_to_string(&file)?)?;
-        metadata.insert(file, meta);
-    }
+    glob(&json_pattern)?
+        .par_bridge()
+        .try_for_each(|file| -> Result<()> {
+            let file = absolute(file?)?;
+            let meta: Metadata = serde_json::from_str(&fs::read_to_string(&file)?)?;
+            metadata.insert(file, meta);
+            Ok(())
+        })?;
 
     println!("Linking Files");
-    for file in glob(&file_pattern)? {
-        let file = file?;
-        let file = absolute(file)?;
-        match file.extension() {
-            Some(extension) if extension != "json" => {
-                if let Ok(exif) = rexif::parse_file(&file) {
-                    let date_entry = exif
-                        .entries
-                        .into_iter()
-                        .filter(|exif| {
-                            exif.tag == ExifTag::DateTime || exif.tag == ExifTag::DateTimeOriginal
-                        })
-                        .min_by_key(|f| f.value_more_readable.clone());
+    glob(&file_pattern)?
+        .into_iter()
+        .try_for_each(|file| -> Result<()> {
+            let file = file?;
+            let file = absolute(file)?;
+            try_link_file(file, &metadata, &counter, &used_named, &output)?;
+            Ok(())
+        })?;
 
-                    if let Some(entry) = date_entry {
-                        let date = NaiveDateTime::parse_from_str(
-                            &entry.value_more_readable,
-                            "%Y:%m:%d %H:%M:%S",
-                        )
-                        .ok();
+    Ok(())
+}
 
-                        // TODO: actually error handle
-                        let json_path =
-                            file.with_extension(extension.to_string_lossy().to_string() + ".json");
+fn try_link_file(
+    file: PathBuf,
+    metadata: &DashMap<PathBuf, Metadata>,
+    counter: &DashMap<String, u64>,
+    used_named: &DashSet<String>,
+    output: &PathBuf,
+) -> Result<(), anyhow::Error> {
+    Ok(match file.extension() {
+        Some(extension) if extension != "json" => {
+            if let Ok(exif) = rexif::parse_file(&file) {
+                let date_entry = exif
+                    .entries
+                    .into_iter()
+                    .filter(|exif| {
+                        exif.tag == ExifTag::DateTime || exif.tag == ExifTag::DateTimeOriginal
+                    })
+                    .min_by_key(|f| f.value_more_readable.clone());
 
-                        let meta: Option<&Metadata> = metadata.get(&json_path);
+                if let Some(entry) = date_entry {
+                    let date = NaiveDateTime::parse_from_str(
+                        &entry.value_more_readable,
+                        "%Y:%m:%d %H:%M:%S",
+                    )
+                    .ok();
 
-                        let people: Option<_> = meta
-                            .and_then(|m| m.people.as_ref())
-                            .map(|people| people.into_iter().map(|person| person.name.as_ref()))
-                            .map(|names| names.collect())
-                            .map(|names: Vec<&str>| names.join(", "));
+                    // TODO: actually error handle
+                    let json_path =
+                        file.with_extension(extension.to_string_lossy().to_string() + ".json");
 
-                        match date {
-                            Some(date) => {
-                                let mut name =
-                                    entry.value_more_readable.to_string().replace(":", "-");
-                                let name_count = counter.add(name.clone());
-                                if let Some(people) = people {
-                                    name += &format!(" ({})", people)
-                                }
-                                if name_count > 0 {
-                                    name += &format!(" ({})", name_count)
-                                };
+                    let people: Option<_> = metadata.get(&json_path).and_then(|m| {
+                        if let Some(people) = &m.people {
+                            let names: Vec<&str> = people
+                                .into_iter()
+                                .map(|person| person.name.as_ref())
+                                .collect();
+                            Some(names.join(", "))
+                        } else {
+                            None
+                        }
+                    });
 
-                                let link_path: PathBuf = output.join(&name);
-
-                                let link_path = absolute(&link_path)?.with_extension(extension);
-
-                                symlink_file(&file, link_path).expect("Could not create symlink");
-
-                                let time = FileTime::from_unix_time(date.timestamp(), 0);
-                                filetime::set_symlink_file_times(&file, time, time).unwrap();
+                    match date {
+                        Some(date) => {
+                            let mut name = entry.value_more_readable.to_string().replace(":", "-");
+                            let name_count = counter.add(name.clone());
+                            if let Some(people) = people {
+                                name += &format!(" ({})", people)
                             }
-                            None => {
-                                let link_path = output.join("No Date");
+                            if name_count > 0 {
+                                name += &format!(" ({})", name_count)
+                            };
 
-                                let mut name = file
-                                    .file_name()
-                                    .ok_or("File ends in ..")?
-                                    .to_string_lossy()
-                                    .to_string();
+                            let link_path: PathBuf = output.join(&name);
 
-                                let name_count = counter.add(name.clone());
-                                if let Some(people) = people {
-                                    name += &format!(" ({})", people)
-                                }
-                                if name_count > 0 {
-                                    name += &format!(" ({})", name_count)
-                                };
+                            let link_path = absolute(&link_path)?.with_extension(extension);
 
-                                fs::create_dir_all(&link_path)?;
-                                let link_path: PathBuf =
-                                    [&link_path, Path::new(&name)].into_iter().collect();
+                            hard_link(&file, &link_path).with_context(|| {
+                                format!("Failed to link file {:?} to {:?}", &link_path, &file)
+                            })?;
 
-                                let link_path = absolute(&link_path)?.with_extension(extension);
+                            let time = FileTime::from_unix_time(date.timestamp(), 0);
+                            filetime::set_symlink_file_times(&file, time, time)?;
+                        }
+                        None => {
+                            let link_path = output.join("No Date");
 
-                                symlink_file(&file, link_path).expect("Could not create symlink");
+                            let name = file
+                                .file_prefix()
+                                .expect("File ends in ..")
+                                .to_string_lossy()
+                                .to_string();
 
-                                let metadata = &file.metadata()?;
-                                if let Some(time) = FileTime::from_creation_time(&metadata) {
-                                    filetime::set_symlink_file_times(&file, time, time).unwrap();
-                                };
+                            let name = if let Some(people) = people {
+                                name + &format!(" ({})", people)
+                            } else {
+                                name
+                            };
+
+                            // ew
+                            let mut try_name = name.clone();
+                            let mut num = 0;
+                            while used_named.contains(&try_name) {
+                                num += 1;
+                                try_name = name.clone() + &format!(" ({})", num);
+                                dbg!("Try", &try_name);
                             }
+                            used_named.insert(try_name.clone());
+                            let name = try_name;
+
+
+                            fs::create_dir_all(&link_path).with_context(|| {
+                                anyhow!("Failed to create directory at {:?}", &link_path)
+                            })?;
+                            let link_path = link_path.join(&name);
+
+                            let link_path = absolute(&link_path)?.with_extension(extension);
+
+                            hard_link(&file, &link_path).with_context(|| {
+                                format!("Failed to link file {:?} to {:?}", &file, &link_path)
+                            })?;
+
+                            let metadata = &file.metadata()?;
+                            if let Some(time) = FileTime::from_creation_time(&metadata) {
+                                filetime::set_symlink_file_times(&file, time, time)?;
+                            };
                         }
                     }
                 }
             }
-            _ => (),
         }
-    }
-
-    Ok(())
+        _ => (),
+    })
 }

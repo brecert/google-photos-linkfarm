@@ -13,3 +13,6 @@ rexif = "0.7.3"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 fncmd = "1.2.5"
+anyhow = { version = "1.0", features = ["std", "backtrace"] }
+dashmap = "5.4.0"
+rayon = "1.5.3"
